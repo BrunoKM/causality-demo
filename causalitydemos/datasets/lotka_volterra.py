@@ -1,6 +1,8 @@
 import numpy as np
 import torch
 import math
+import scipy
+import scipy.integrate
 import matplotlib.pyplot as plt
 import seaborn as sns
 from torch.utils.data import Dataset, DataLoader
@@ -24,25 +26,6 @@ class LotkaVolterraSimulator(object):
         self.gamma = gamma
         self.delta = delta
         self.time_delta = time_delta
-        self.x: float = 0.
-        self.y: float = 0.
-        self.step: int = 0
-
-    @property
-    def state(self) -> np.array:
-        return np.array([self.x, self.y])
-
-    def init_state(self, x: float, y: float) -> None:
-        self.x = x
-        self.y = y
-        self.step = 0
-
-    def update_state(self) -> None:
-        dx = self.alpha * self.x - self.beta * self.x * self.y
-        dy = self.delta * self.x * self.y - self.gamma * self.y
-        self.x += dx * self.time_delta
-        self.y += dy * self.time_delta
-        self.step += 1
 
     def run_simulation(self, init_x: float, init_y: float, n_steps: int) -> np.array:
         """
@@ -50,8 +33,8 @@ class LotkaVolterraSimulator(object):
         initial state.
 
         Args:
-            init_x: float representing x value at step 0
-            init_y: float representing y value at step 0
+            init_x: float representing x (PREY) value at step 0
+            init_y: float representing y (PREDATOR) value at step 0
             n_steps: How many steps to simulate for
 
         Returns:
@@ -60,14 +43,31 @@ class LotkaVolterraSimulator(object):
         if n_steps <= 0:
             raise ValueError(f'n_steps must be a positive integer, but was {n_steps}')
 
-        self.init_state(init_x, init_y)
+        init_state = np.array((init_x, init_y))
+        sol = scipy.integrate.solve_ivp(self.system_dynamics_func, t_span=(0, n_steps * self.time_delta + 1),
+                                        y0=init_state, vectorized=True,
+                                        t_eval=np.arange(0, n_steps + 1, dtype=np.float64) * self.time_delta)
+        return sol.y.T
 
-        simulated_states = np.zeros([n_steps + 1, 2])
-        simulated_states[0] = self.state
-        for step in range(1, n_steps + 1):
-            self.update_state()
-            simulated_states[step] = self.state
-        return simulated_states
+    def system_dynamics_func(self, t: float, state: np.ndarray) -> np.ndarray:
+        """
+        The system dynamics function F, such that the ODE satisfies:
+            dx/dt = F(t, x)
+        Where x is the (2-dimensional) state vector.
+
+        The time argument t needs to be present in the header for compliance with the scipy ODE-solver API, althought
+        it is not used to determine dx/dt.
+        Args:
+            t: time
+            state: state vector of shape [2] or a set of k states of shape [2, k].
+
+        Returns:
+            An array of derivatives dy/dt, either of shape [2] or [2, k] if k state values were passed.
+        """
+        x, y = state[0], state[1]
+        dx = self.alpha * x - self.beta * x * y
+        dy = self.delta * x * y - self.gamma * y
+        return np.stack((dx, dy), axis=0)
 
 
 class LotkaVolterraDataset(Dataset):
