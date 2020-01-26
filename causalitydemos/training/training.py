@@ -1,14 +1,14 @@
 import math
 import os
 import time
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.nn.utils import clip_grad_norm_
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
+from torch.utils.tensorboard import SummaryWriter
 
 
 class Trainer(object):
@@ -22,7 +22,8 @@ class Trainer(object):
                  device=None,
                  num_workers: int = 4,
                  pin_memory: bool = False,
-                 log_interval: int = 100) -> None:
+                 log_interval: int = 100,
+                 tensorboard_logdir: Optional[str] = None) -> None:
         assert isinstance(model, nn.Module)
         assert isinstance(train_dataset, Dataset)
         assert isinstance(test_dataset, Dataset)
@@ -36,6 +37,8 @@ class Trainer(object):
         self.scheduler = scheduler
         self.pin_memory = pin_memory
         self.log_interval = log_interval
+        self.tensorboard_logdir = tensorboard_logdir
+        self.writer = SummaryWriter(tensorboard_logdir) if tensorboard_logdir else None
 
         self.trainloader = DataLoader(train_dataset,
                                       batch_size=batch_size,
@@ -66,8 +69,9 @@ class Trainer(object):
             print(f"Epoch {self.epochs}:\tTest Loss: {np.round(self.test_loss[-1], 6)};\t"
                   f"Train Loss: {np.round(mean_train_loss, 6)};\t"
                   f"Time per epoch: {time.time() - start_time}s" + learning_rate_str)
-
             if self.scheduler:
+                if self.writer:
+                    self.writer.add_scalar('learning rate', self.scheduler.get_lr()[0], self.steps)
                 self.scheduler.step()
 
     def _train_single_epoch(self):
@@ -95,6 +99,8 @@ class Trainer(object):
             # log statistics
             if self.steps % self.log_interval == 0:
                 self.train_loss.append(loss.item())
+                if self.writer:
+                    self.writer.add_scalar('training loss', loss.item(), self.steps)
         self.epochs += 1
 
     def test(self):
@@ -119,3 +125,5 @@ class Trainer(object):
 
         # Log statistics
         self.test_loss.append(test_loss)
+        if self.writer:
+            self.writer.add_scalar('test loss', test_loss, self.steps)
