@@ -1,3 +1,7 @@
+plots
+notebooks
+# Visual studio code files
+.vscode
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
