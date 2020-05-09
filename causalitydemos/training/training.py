@@ -58,10 +58,10 @@ class Trainer(object):
 
     def train(self, n_epochs: int) -> None:
         for epoch in range(self.epochs, self.epochs + n_epochs):
-            # Train
             start_time = time.time()
-            self._train_single_epoch()
 
+            self.model.train()  # Set model in train mode
+            self._train_single_epoch()
             self.test()
 
             mean_train_loss = np.mean(self.train_loss[-math.floor(len(self.trainloader) / self.log_interval):])
@@ -75,9 +75,6 @@ class Trainer(object):
                 self.scheduler.step()
 
     def _train_single_epoch(self):
-        # Set model in train mode
-        self.model.train()
-
         for i, data in enumerate(self.trainloader, 0):
             # Get inputs
             inputs, targets = data
