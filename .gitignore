@@ -109,3 +109,6 @@ venv.bak/
 
 .idea
 **/.DS_Store
+
+# flake8 settings
+*.flake8
