@@ -10,6 +10,8 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.tensorboard import SummaryWriter
 
+from causalitydemos.models import cond_vae_loss_function
+
 
 class Trainer(object):
     def __init__(self, model: torch.nn.Module,
@@ -64,8 +66,9 @@ class Trainer(object):
             self._train_single_epoch()
             self.test()
 
-            mean_train_loss = np.mean(self.train_loss[-math.floor(len(self.trainloader) / self.log_interval):])
-            learning_rate_str = f"\tLR: {np.round(self.scheduler.get_lr(), 4)}" if self.scheduler else ""
+            mean_train_loss = np.mean(
+                self.train_loss[-math.floor(len(self.trainloader) / self.log_interval):])
+            learning_rate_str = f"\tLR: {np.round(self.scheduler.get_lr(), 5)}" if self.scheduler else ""
             print(f"Epoch {self.epochs}:\tTest Loss: {np.round(self.test_loss[-1], 6)};\t"
                   f"Train Loss: {np.round(mean_train_loss, 6)};\t"
                   f"Time per epoch: {time.time() - start_time}s" + learning_rate_str)
@@ -103,7 +106,6 @@ class Trainer(object):
     def test(self):
         """
         Single evaluation on the entire provided test dataset.
-        Return accuracy, mean test loss, and an array of predicted probabilities
         """
         test_loss = 0.
 
@@ -118,6 +120,72 @@ class Trainer(object):
                                          (inputs, labels))
                 outputs = self.model(inputs)
                 test_loss += self.criterion(outputs, labels).item()
+        test_loss = test_loss / len(self.testloader)
+
+        # Log statistics
+        self.test_loss.append(test_loss)
+        if self.writer:
+            self.writer.add_scalar('test loss', test_loss, self.steps)
+
+
+class CondVAETrainer(Trainer):
+    def __init__(self, model: torch.nn.Module,
+                 train_dataset: Dataset,
+                 test_dataset: Dataset,
+                 optimizer,
+                 scheduler=None,
+                 batch_size: int = 64,
+                 device=None,
+                 num_workers: int = 4,
+                 pin_memory: bool = False,
+                 log_interval: int = 100,
+                 tensorboard_logdir: Optional[str] = None) -> None:
+        super().__init__(model=model,
+                         criterion=cond_vae_loss_function,
+                         train_dataset=train_dataset,
+                         test_dataset=test_dataset,
+                         optimizer=optimizer,
+                         scheduler=scheduler,
+                         batch_size=batch_size,
+                         device=device)
+        
+    def _train_single_epoch(self):
+        self.model.train()
+        for batch_idx, data in enumerate(self.trainloader, 0):
+            y, x = data
+            if self.device is not None:
+                # Move data to adequate device
+                y, x = map(lambda batch: batch.to(self.device, non_blocking=self.pin_memory), (y, x))
+
+            self.optimizer.zero_grad()
+            recon_x, mu, logvar = self.model(x, y)
+            loss = self.criterion(recon_x, x, mu, logvar)
+            assert torch.isnan(loss) == torch.tensor([0], dtype=torch.uint8).to(self.device)  # No NaN loss
+            loss.backward()
+            self.optimizer.step()
+
+            self.steps += 1
+            if self.steps % self.log_interval == 0:
+                self.train_loss.append(loss.item())
+                if self.writer:
+                    self.writer.add_scalar('training loss', loss.item(), self.steps)
+        self.epochs += 1
+
+    def test(self):
+        """
+        Single evaluation on the entire provided test dataset.
+        """
+        self.model.eval()
+        test_loss = 0.
+
+        with torch.no_grad():
+            for i, data in enumerate(self.testloader, 0):
+                # Get inputs
+                y, x = data
+                if self.device is not None:
+                    y, x = map(lambda batch: batch.to(self.device), (y, x))
+                recon_x, mu, logvar = self.model(x, y)
+                test_loss += self.criterion(recon_x, x, mu, logvar).item()
         test_loss = test_loss / len(self.testloader)
 
         # Log statistics

@@ -14,17 +14,20 @@ sns.set()
 
 
 class LotkaVolterraSimulator(object):
-    def __init__(self, alpha: float, beta: float, gamma: float, delta: float) -> None:
+    def __init__(self, alpha: float, beta: float, gamma: float, delta: float, rtol: float = 1e-3) -> None:
         """
 
         Args:
             alpha, beta, gamma, delta: parameters of the Lotka-Volterra diff. equation
                 (https://en.wikipedia.org/wiki/Lotka%E2%80%93Volterra_equations)
+            rtol: Relative tolerance for the ODE solver 
         """
         self.alpha = alpha
         self.beta = beta
         self.gamma = gamma
         self.delta = delta
+        # ODE Solver parameters
+        self.rtol = rtol
 
     def run_simulation(self, init_x: float, init_y: float, eval_times: np.ndarray) -> np.array:
         """
@@ -37,10 +40,17 @@ class LotkaVolterraSimulator(object):
         Returns:
             Array of shape [len(eval_times), 2] with the values of the state at each of the times in eval_times
         """
+        if isinstance(eval_times, np.ndarray):
+            pass
+        elif isinstance(eval_times, (list, tuple)):
+            eval_times = np.array(eval_times, dtype=np.float64)
+        else:
+            raise TypeError('eval_times has to be a 1D numpy array, or a list/tuple of type that'
+                            ' can be cast to float')
         assert eval_times.ndim == 1
         init_state = np.array((init_x, init_y))
         sol = scipy.integrate.solve_ivp(self.system_dynamics_func, t_span=(0, eval_times[-1]),
-                                        y0=init_state, vectorized=True, t_eval=eval_times)
+                                        y0=init_state, vectorized=True, t_eval=eval_times, rtol=self.rtol)
         return sol.y.T
 
     def run_simulation_with_fixed_int(self, init_x: float, init_y: float, n_steps: int, time_delta: float = 1.0) -> np.array:
@@ -208,7 +218,7 @@ class VariableStepLotkaVolterraDataset(LotkaVolterraDataset):
             step_deltas = np.random.uniform(self.min_time_delta, self.max_time_delta, [self.samples_per_sim])
             # Sample the initial starting point
             start_times = np.random.uniform(0., self.max_time_delta, [self.samples_per_sim - 1])
-            start_times = np.concatenate(([0.], start_times)) # At least one sample starts at time 0.
+            start_times = np.concatenate(([0.], start_times))  # At least one sample starts at time 0.
 
             eval_times = np.concatenate((start_times, start_times+step_deltas))
             sort_idxs = np.argsort(eval_times)  # Eval. times must be in sorted order
@@ -237,27 +247,38 @@ class VariableStepLotkaVolterraDataset(LotkaVolterraDataset):
 class FixedStepLotkaVolterraDataset(LotkaVolterraDataset):
     """LotkaVolterra Simulation Data dataset with a fixed time-step."""
 
-    def __init__(self, simulator: LotkaVolterraSimulator, size: int = 100000, step_delta: int = 3000,
-                 subsample_sim: int = 1, seed: int = 0, transform=None) -> None:
-        assert step_delta >= 1
-        super(FixedStepLotkaVolterraDataset, self).__init__(simulator=simulator, size=size, transform=transform)
-        self.step_delta = step_delta
-        self.subsample_sim = subsample_sim
+    def __init__(self, simulator: LotkaVolterraSimulator, size: int = 100000, time_delta: int = 400.,
+                 samples_per_sim: int = 1, seed: int = 0, transform=None) -> None:
+        super().__init__(simulator=simulator, size=size, transform=transform)
+        self.time_delta = time_delta
+        self.samples_per_sim = samples_per_sim 
         self.seed = seed
         self.x, self.y = self.generate_dataset()
 
     def generate_dataset(self) -> Tuple[np.array, np.array]:
+        """
+        Dataset with inputs x=(predator_population(t), prey_population(t)) and outputs
+        y=(predator_population(t + time_delta), prey_population(t+time_delta)), where time_delta
+        is fixed.
+
+        Returns:
+            Tuple[np.array, np.array]: x, y
+        """
         np.random.seed(self.seed)
         sim_data_x = []
         sim_data_y = []
-        num_sims = math.ceil(self.size * self.subsample_sim / self.step_delta)
-        for sim in range(num_sims):
-            sim_results = self.simulator.run_simulation(np.random.lognormal(), np.random.lognormal(),
-                                                        self.step_delta * 2 - 1)
-            sim_data_x.append(sim_results[:self.step_delta:self.subsample_sim])
-            sim_data_y.append(sim_results[self.step_delta::self.subsample_sim])
+        num_sims = math.ceil(self.size / self.samples_per_sim)
+        for sim in tqdm.tqdm(range(num_sims)):
+            x_times = np.linspace(0, self.time_delta, self.samples_per_sim, endpoint=False)
+            y_times = x_times + self.time_delta
+            sim_results = self.simulator.run_simulation(
+                np.random.lognormal(), np.random.lognormal(),
+                eval_times=np.concatenate((x_times, y_times)))
+            sim_data_x.append(sim_results[:self.samples_per_sim])
+            sim_data_y.append(sim_results[self.samples_per_sim:])
 
-        sim_data_x, sim_data_y = map(lambda l: np.concatenate(l, axis=0)[:self.size], (sim_data_x, sim_data_y))
+        sim_data_x, sim_data_y = map(
+            lambda l: np.concatenate(l, axis=0)[:self.size], (sim_data_x, sim_data_y))
         return sim_data_x, sim_data_y
 
 

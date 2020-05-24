@@ -7,10 +7,10 @@ from typing import List, Optional
 
 class NeuralNetwork(torch.nn.Module):
     def __init__(self, feature_dim: int, hidden_dims: List[int], output_dim: int,
-                 activation_function: torch.nn.Module = F.relu,
+                 activation_function=torch.relu,
                  batch_norm: bool = False,
                  dropout_rate: float = 0.) -> None:
-        super(NeuralNetwork, self).__init__()
+        super().__init__()
         if dropout_rate > 1. or dropout_rate < 0.:
             raise ValueError(f'Dropout rate has to be between 0. and 1., but was {dropout_rate}')
 
@@ -23,7 +23,7 @@ class NeuralNetwork(torch.nn.Module):
         self.hidden_layers.extend(
             [torch.nn.Linear(hidden_dims[i], hidden_dims[i+1]) for i in range(len(hidden_dims) - 1)])
         self.batch_norm_ops = [nn.BatchNorm1d(num_features=h_size) for h_size in hidden_dims]
-        self.dropout_ops = [nn.Dropout(p=dropout_rate)]
+        self.dropout_ops = [nn.Dropout(p=dropout_rate)] * len(hidden_dims)
         self.predict_layer = torch.nn.Linear(hidden_dims[-1], output_dim)
 
     def forward(self, x):
@@ -33,8 +33,8 @@ class NeuralNetwork(torch.nn.Module):
                 x = self.batch_norm_ops[i](x)
             if self.dropout_rate > 0.:
                 x = self.dropout_ops[i](x)
-        x = self.predict_layer(x)
-        return x
+        y = self.predict_layer(x)
+        return y
 
 
 class SinFeatureNetwork(torch.nn.Module):
