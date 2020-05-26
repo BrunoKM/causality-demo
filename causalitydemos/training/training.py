@@ -139,6 +139,7 @@ class CondVAETrainer(Trainer):
                  num_workers: int = 4,
                  pin_memory: bool = False,
                  log_interval: int = 100,
+                 obs_sigma: float=1.0,
                  tensorboard_logdir: Optional[str] = None) -> None:
         super().__init__(model=model,
                          criterion=cond_vae_loss_function,
@@ -148,6 +149,7 @@ class CondVAETrainer(Trainer):
                          scheduler=scheduler,
                          batch_size=batch_size,
                          device=device)
+        self.obs_sigma = obs_sigma
         
     def _train_single_epoch(self):
         self.model.train()
@@ -159,7 +161,7 @@ class CondVAETrainer(Trainer):
 
             self.optimizer.zero_grad()
             recon_x, mu, logvar = self.model(x, y)
-            loss = self.criterion(recon_x, x, mu, logvar)
+            loss = self.criterion(recon_x, x, mu, logvar, obs_sigma=self.obs_sigma)
             assert torch.isnan(loss) == torch.tensor([0], dtype=torch.uint8).to(self.device)  # No NaN loss
             loss.backward()
             self.optimizer.step()

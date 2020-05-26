@@ -1,1 +1,1 @@
-from causalitydemos.training.training import Trainer
+from causalitydemos.training.training import Trainer, CondVAETrainer
